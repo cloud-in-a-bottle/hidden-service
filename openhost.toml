@@ -1,15 +1,15 @@
 [app]
 name = "hidden-service"
-version = "0.1.0"
-description = "Tor hidden service hosting a simple web page accessible via .onion"
+version = "0.2.0"
+description = "Tor hidden service with vanity address generation and a simple page editor CMS"
 
 [runtime.container]
 image = "Dockerfile"
 port = 8080
 
 [resources]
-memory_mb = 512
-cpu_millicores = 500
+memory_mb = 1024
+cpu_millicores = 2000
 
 [data]
 app_data = true

@@ -1,0 +1,36 @@
+<div class="section-header">
+    <h2>{heading}</h2>
+</div>
+
+<form method="POST" action="{action}">
+    <div class="form-group">
+        <label for="slug">Slug (URL path)</label>
+        <input type="text" id="slug" name="slug" value="{slug}" placeholder="my-page"
+               pattern="[a-z0-9\-]+" title="Lowercase letters, numbers, and hyphens only"
+               {slug_readonly}>
+    </div>
+
+    <div class="form-group">
+        <label for="content">Content (Markdown)</label>
+        <textarea id="content" name="content" placeholder="# Page Title&#10;&#10;Write your content here...">{content}</textarea>
+    </div>
+
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <button type="submit" class="btn btn-primary">Save Page</button>
+        <a href="/pages" class="btn btn-secondary">Cancel</a>
+        {delete_button}
+    </div>
+</form>
+
+<script>
+// Allow Tab key in textarea
+document.getElementById('content').addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        var start = this.selectionStart;
+        var end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + '    ' + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 4;
+    }
+});
+</script>

@@ -1,170 +1,377 @@
-"""Simple web server that serves content over the Tor hidden service (HTTPS) and provides a health check (HTTP)."""
+"""
+Tor Hidden Service server with admin CMS and HTTPS onion serving.
 
+Port 8080 (HTTP): Admin panel + health check, behind OpenHost auth.
+Port 3000 (HTTPS): Public-facing onion site serving CMS pages.
+"""
+
+import html
 import http.server
 import json
 import os
+import shutil
 import socketserver
 import ssl
-import sys
 import threading
+import urllib.parse
+
+import cms
 
 ONION_PORT = 3000
-HEALTH_PORT = 8080
-HOSTNAME_FILE = "/var/lib/tor/hidden_service/hostname"
-APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA", "/data/app_data")
+ADMIN_PORT = 8080
 TLS_CERT = "/app/tls/cert.pem"
 TLS_KEY = "/app/tls/key.pem"
+TEMPLATES_DIR = "/app/templates"
+STATIC_DIR = "/app/static"
+APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA", "/data/app_data")
 
 
-def get_onion_address():
-    """Read the .onion address from Tor's hidden service directory."""
-    # Check persistent storage first, then Tor's live directory
-    persistent_hostname = os.path.join(APP_DATA_DIR, "hostname")
-    for path in [persistent_hostname, HOSTNAME_FILE]:
-        try:
-            with open(path) as f:
-                return f.read().strip()
-        except FileNotFoundError:
-            continue
-    return None
+def _read_template(name: str) -> str:
+    with open(os.path.join(TEMPLATES_DIR, name)) as f:
+        return f.read()
 
 
-class OnionHandler(http.server.BaseHTTPRequestHandler):
-    """Handler for requests arriving via the Tor hidden service (HTTPS)."""
+def _render_admin(title: str, content: str, flash: str = "") -> str:
+    base = _read_template("admin_base.html")
+    return base.format(title=html.escape(title), content=content, flash=flash)
+
+
+def _flash_html(message: str, kind: str = "success") -> str:
+    return f'<div class="flash flash-{kind}">{html.escape(message)}</div>'
+
+
+def _page_list_html(pages: list[dict], show_empty: bool = True) -> str:
+    if not pages:
+        if show_empty:
+            return '<p style="color: var(--text-secondary);">No pages yet. <a href="/pages/new">Create one</a>.</p>'
+        return ""
+    items = []
+    for p in pages:
+        items.append(
+            f"<li>"
+            f'<div><span class="page-title">{html.escape(p["title"])}</span>'
+            f'<span class="page-slug">/{html.escape(p["slug"])}</span></div>'
+            f'<div class="page-actions">'
+            f'<a href="/pages/edit/{html.escape(p["slug"])}" class="btn btn-secondary btn-sm">Edit</a>'
+            f"</div>"
+            f"</li>"
+        )
+    return '<ul class="page-list">' + "\n".join(items) + "</ul>"
+
+
+class AdminHandler(http.server.BaseHTTPRequestHandler):
+    """Admin panel and health check handler (port 8080, behind OpenHost auth)."""
 
     def do_GET(self):
-        onion = get_onion_address() or "unknown (still bootstrapping)"
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
 
-        if self.path == "/":
-            body = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Tor Hidden Service</title>
-    <style>
-        body {{
-            font-family: monospace;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }}
-        .container {{
-            text-align: center;
-            padding: 2rem;
-            border: 1px solid #444;
-            border-radius: 8px;
-            background: #16213e;
-            max-width: 600px;
-        }}
-        h1 {{ color: #7f5af0; }}
-        .onion {{ color: #2cb67d; word-break: break-all; }}
-        .info {{ color: #888; margin-top: 1rem; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Tor Hidden Service</h1>
-        <p>This site is hosted as a Tor hidden service on OpenHost.</p>
-        <p class="onion">{onion}</p>
-        <p class="info">Powered by OpenHost + Tor</p>
-    </div>
-</body>
-</html>"""
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(body.encode())
-        elif self.path == "/status":
-            data = {"status": "ok", "onion_address": onion}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(data).encode())
+        if path == "/health":
+            self._health()
+        elif path == "/":
+            self._dashboard()
+        elif path == "/pages":
+            self._pages_list()
+        elif path == "/pages/new":
+            self._page_editor(slug="", content="", is_new=True)
+        elif path.startswith("/pages/edit/"):
+            slug = path[len("/pages/edit/") :]
+            self._page_editor_load(slug)
+        elif path == "/settings":
+            self._settings()
+        elif path.startswith("/static/"):
+            self._serve_static(path[len("/static/") :])
         else:
-            self.send_response(404)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Not Found")
+            self._not_found()
 
-    def log_message(self, format, *args):
-        print(f"[onion] {args[0]}", flush=True)
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        body = self._read_body()
+        params = urllib.parse.parse_qs(body, keep_blank_values=True)
 
+        if path == "/pages/new":
+            self._page_save_new(params)
+        elif path.startswith("/pages/edit/"):
+            slug = path[len("/pages/edit/") :]
+            self._page_save_existing(slug, params)
+        elif path.startswith("/pages/delete/"):
+            slug = path[len("/pages/delete/") :]
+            self._page_delete(slug)
+        elif path == "/settings/vanity":
+            self._set_vanity(params)
+        elif path == "/settings/reset-address":
+            self._reset_address()
+        else:
+            self._not_found()
 
-class HealthHandler(http.server.BaseHTTPRequestHandler):
-    """Handler for OpenHost health checks and status page (HTTP, not exposed via Tor)."""
+    def _read_body(self) -> str:
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length).decode("utf-8")
 
-    def do_GET(self):
-        onion = get_onion_address()
+    def _respond_html(self, code: int, body: str):
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body.encode())
 
-        if self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            data = {
+    def _respond_json(self, code: int, data: dict):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def _redirect(self, location: str):
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def _not_found(self):
+        self._respond_html(404, _render_admin("Not Found", "<h2>404 Not Found</h2>"))
+
+    def _health(self):
+        onion = cms.get_onion_address()
+        state = cms.get_state()
+        self._respond_json(
+            200,
+            {
                 "status": "healthy",
                 "onion_address": onion,
                 "tor_bootstrapped": onion is not None,
-            }
-            self.wfile.write(json.dumps(data).encode())
-        elif self.path == "/":
-            onion_display = onion or "Tor is still bootstrapping..."
-            onion_url = f"https://{onion}" if onion else "#"
-            body = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Hidden Service Status</title>
-    <style>
-        body {{
-            font-family: monospace;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }}
-        .container {{
-            text-align: center;
-            padding: 2rem;
-            border: 1px solid #444;
-            border-radius: 8px;
-            background: #16213e;
-            max-width: 600px;
-        }}
-        h1 {{ color: #7f5af0; }}
-        .onion {{ color: #2cb67d; word-break: break-all; font-size: 1.1em; }}
-        .onion a {{ color: #2cb67d; text-decoration: none; }}
-        .onion a:hover {{ text-decoration: underline; }}
-        .info {{ color: #888; margin-top: 1rem; }}
-        .status {{ color: {"#2cb67d" if onion else "#e53170"}; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Tor Hidden Service</h1>
-        <p class="status">Status: {"Online (HTTPS)" if onion else "Bootstrapping..."}</p>
-        <p>Onion address:</p>
-        <p class="onion"><a href="{onion_url}">{onion_display}</a></p>
-        <p class="info">Access this address using the Tor Browser.</p>
-        <p class="info">Served over HTTPS with a self-signed certificate.</p>
-        <p class="info">Powered by OpenHost + Tor</p>
-    </div>
-</body>
-</html>"""
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(body.encode())
-        else:
+                "app_state": state.get("status", "unknown"),
+            },
+        )
+
+    def _dashboard(self):
+        onion = cms.get_onion_address() or "Bootstrapping..."
+        state = cms.get_state()
+        pages = cms.list_pages()
+
+        tpl = _read_template("admin_dashboard.html")
+        content = tpl.format(
+            onion_address=html.escape(onion),
+            status=html.escape(state.get("status", "unknown")),
+            page_list=_page_list_html(pages),
+        )
+        self._respond_html(200, _render_admin("Dashboard", content))
+
+    def _pages_list(self):
+        pages = cms.list_pages()
+        tpl = _read_template("admin_pages.html")
+        content = tpl.format(page_list=_page_list_html(pages))
+        self._respond_html(200, _render_admin("Pages", content))
+
+    def _page_editor(self, slug: str, content: str, is_new: bool, flash: str = ""):
+        tpl = _read_template("admin_edit.html")
+        editor = tpl.format(
+            heading="New Page" if is_new else f"Edit: {slug}",
+            action="/pages/new" if is_new else f"/pages/edit/{html.escape(slug)}",
+            slug=html.escape(slug),
+            content=html.escape(content),
+            slug_readonly="" if is_new else 'readonly style="opacity:0.6"',
+            delete_button=""
+            if is_new
+            else f'<form method="POST" action="/pages/delete/{html.escape(slug)}" style="display:inline" '
+            f"onsubmit=\"return confirm('Delete this page?');\">"
+            f'<button type="submit" class="btn btn-danger">Delete</button></form>',
+        )
+        self._respond_html(
+            200,
+            _render_admin(
+                "New Page" if is_new else f"Edit {slug}", editor, flash=flash
+            ),
+        )
+
+    def _page_editor_load(self, slug: str):
+        page = cms.get_page(slug)
+        if not page:
+            self._not_found()
+            return
+        self._page_editor(slug=page["slug"], content=page["content"], is_new=False)
+
+    def _page_save_new(self, params: dict):
+        slug = params.get("slug", [""])[0].strip()
+        content = params.get("content", [""])[0]
+
+        if not slug:
+            self._page_editor(
+                slug="",
+                content=content,
+                is_new=True,
+                flash=_flash_html("Slug is required.", "error"),
+            )
+            return
+
+        # Check if page already exists
+        if cms.get_page(slug):
+            self._page_editor(
+                slug=slug,
+                content=content,
+                is_new=True,
+                flash=_flash_html(f"Page '{slug}' already exists.", "error"),
+            )
+            return
+
+        saved_slug = cms.save_page(slug, content)
+        self._redirect(f"/pages/edit/{saved_slug}")
+
+    def _page_save_existing(self, slug: str, params: dict):
+        content = params.get("content", [""])[0]
+        cms.save_page(slug, content)
+        self._page_editor(
+            slug=slug, content=content, is_new=False, flash=_flash_html("Page saved.")
+        )
+
+    def _page_delete(self, slug: str):
+        cms.delete_page(slug)
+        self._redirect("/pages")
+
+    def _settings(self):
+        onion = cms.get_onion_address() or "Not yet generated"
+        prefix = cms.get_vanity_prefix()
+
+        warning = ""
+        if cms.get_onion_address():
+            warning = (
+                '<br><strong style="color: var(--danger);">Warning:</strong> '
+                "Generating a new vanity address will replace your current .onion address permanently."
+            )
+
+        tpl = _read_template("admin_settings.html")
+        content = tpl.format(
+            onion_address=html.escape(onion),
+            current_prefix=html.escape(prefix) if prefix else "<em>none</em>",
+            regenerate_warning=warning,
+        )
+        self._respond_html(200, _render_admin("Settings", content))
+
+    def _set_vanity(self, params: dict):
+        prefix = params.get("prefix", [""])[0].strip().lower()
+        cms.set_vanity_prefix(prefix)
+
+        # Clear existing keys so they'll be regenerated on next restart
+        hs_dir = os.path.join(APP_DATA_DIR, "hidden_service")
+        if os.path.exists(hs_dir):
+            shutil.rmtree(hs_dir)
+        hostname_file = os.path.join(APP_DATA_DIR, "hostname")
+        if os.path.exists(hostname_file):
+            os.remove(hostname_file)
+
+        self._redirect("/settings")
+
+    def _reset_address(self):
+        # Clear vanity prefix
+        cms.set_vanity_prefix("")
+        # Clear existing keys
+        hs_dir = os.path.join(APP_DATA_DIR, "hidden_service")
+        if os.path.exists(hs_dir):
+            shutil.rmtree(hs_dir)
+        hostname_file = os.path.join(APP_DATA_DIR, "hostname")
+        if os.path.exists(hostname_file):
+            os.remove(hostname_file)
+
+        self._redirect("/settings")
+
+    def _serve_static(self, filename: str):
+        filepath = os.path.join(STATIC_DIR, filename)
+        if not os.path.exists(filepath) or not os.path.isfile(filepath):
             self.send_response(404)
             self.end_headers()
+            return
+        ext = os.path.splitext(filename)[1]
+        content_type = {
+            ".css": "text/css",
+            ".js": "application/javascript",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+        }.get(ext, "application/octet-stream")
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        with open(filepath, "rb") as f:
+            data = f.read()
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def log_message(self, format, *args):
-        print(f"[health] {args[0]}", flush=True)
+        print(f"[admin] {args[0]}", flush=True)
+
+
+class OnionHandler(http.server.BaseHTTPRequestHandler):
+    """Public-facing onion site handler (port 3000, HTTPS via Tor)."""
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+
+        if path == "/":
+            self._serve_page("index")
+        elif path == "/status":
+            self._status()
+        else:
+            # Strip leading slash to get slug
+            slug = path.lstrip("/")
+            self._serve_page(slug)
+
+    def _serve_page(self, slug: str):
+        page = cms.get_page(slug)
+        if not page:
+            self._not_found()
+            return
+
+        pages = cms.list_pages()
+        nav = self._build_nav(pages)
+
+        # Extract title from first h1 or use slug
+        title = slug
+        for line in page["content"].split("\n"):
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+
+        tpl = _read_template("onion_page.html")
+        body = tpl.format(
+            title=html.escape(title),
+            nav=nav,
+            body=page["html"],
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def _build_nav(self, pages: list[dict]) -> str:
+        links = []
+        for p in pages:
+            href = "/" if p["slug"] == "index" else f"/{p['slug']}"
+            links.append(f'<a href="{html.escape(href)}">{html.escape(p["title"])}</a>')
+        if links:
+            return '<nav class="nav">' + " ".join(links) + "</nav>"
+        return ""
+
+    def _not_found(self):
+        tpl = _read_template("onion_page.html")
+        body = tpl.format(
+            title="Not Found",
+            nav="",
+            body="<h1>404</h1><p>Page not found.</p>",
+        )
+        self.send_response(404)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def _status(self):
+        onion = cms.get_onion_address()
+        data = {"status": "ok", "onion_address": onion}
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def log_message(self, format, *args):
+        print(f"[onion] {args[0]}", flush=True)
 
 
 def run_https_server(handler_class, port, name):
@@ -172,16 +379,23 @@ def run_https_server(handler_class, port, name):
     server = socketserver.TCPServer(("0.0.0.0", port), handler_class)
     server.allow_reuse_address = True
 
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(certfile=TLS_CERT, keyfile=TLS_KEY)
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    # Only wrap with TLS if cert exists (might not during early startup)
+    if os.path.exists(TLS_CERT) and os.path.exists(TLS_KEY):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile=TLS_CERT, keyfile=TLS_KEY)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        print(f"[{name}] Listening on port {port} (HTTPS)", flush=True)
+    else:
+        print(
+            f"[{name}] WARNING: TLS cert not found, listening on port {port} (HTTP)",
+            flush=True,
+        )
 
-    print(f"[{name}] Listening on port {port} (HTTPS)", flush=True)
     server.serve_forever()
 
 
 def run_http_server(handler_class, port, name):
-    """Run a plain HTTP server (for health checks)."""
+    """Run a plain HTTP server."""
     server = socketserver.TCPServer(("0.0.0.0", port), handler_class)
     server.allow_reuse_address = True
     print(f"[{name}] Listening on port {port} (HTTP)", flush=True)
@@ -195,9 +409,9 @@ def main():
     )
     onion_thread.start()
 
-    # Start health check handler as plain HTTP (OpenHost connects to this)
+    # Start admin handler as plain HTTP (OpenHost connects to this)
     print("[main] Starting servers...", flush=True)
-    run_http_server(HealthHandler, HEALTH_PORT, "health")
+    run_http_server(AdminHandler, ADMIN_PORT, "admin")
 
 
 if __name__ == "__main__":
