@@ -3,13 +3,13 @@ FROM debian:bookworm-slim AS builder
 # Build mkp224o for vanity onion address generation
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        git gcc make autoconf libsodium-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && git clone https://github.com/cathugger/mkp224o.git /build/mkp224o \
-    && cd /build/mkp224o \
-    && ./autogen.sh \
-    && ./configure --enable-donna \
-    && make
+        git gcc make autoconf libsodium-dev ca-certificates
+
+RUN git clone https://github.com/cathugger/mkp224o.git /build/mkp224o && \
+    cd /build/mkp224o && \
+    ./autogen.sh && \
+    ./configure --enable-donna && \
+    make
 
 FROM debian:bookworm-slim
 
