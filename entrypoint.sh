@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DATA="${OPENHOST_APP_DATA:-/data/app_data}"
+APP_DATA="${OPENHOST_APP_DATA_DIR:-/data/app_data/hidden-service}"
 TOR_HS_DIR="/var/lib/tor/hidden_service"
 TOR_DATA_DIR="/var/lib/tor/data"
 PERSISTENT_HS_DIR="$APP_DATA/hidden_service"

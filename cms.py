@@ -6,7 +6,7 @@ import re
 
 import markdown
 
-APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA", "/data/app_data")
+APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA_DIR", "/data/app_data/hidden-service")
 PAGES_DIR = os.path.join(APP_DATA_DIR, "pages")
 STATE_FILE = os.path.join(APP_DATA_DIR, "state.json")
 HOSTNAME_FILE = "/var/lib/tor/hidden_service/hostname"

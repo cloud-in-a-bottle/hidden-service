@@ -19,7 +19,7 @@ ONION_PORT = 3000
 ADMIN_PORT = 8080
 TEMPLATES_DIR = "/app/templates"
 STATIC_DIR = "/app/static"
-APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA", "/data/app_data")
+APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA_DIR", "/data/app_data/hidden-service")
 
 
 def _read_template(name: str) -> str:
@@ -275,10 +275,10 @@ class OnionHandler(http.server.BaseHTTPRequestHandler):
                 break
 
         tpl = _read_template("onion_page.html")
-        body = tpl.format(
-            title=html.escape(title),
-            nav=nav,
-            body=page["html"],
+        body = (
+            tpl.replace("{title}", html.escape(title))
+            .replace("{nav}", nav)
+            .replace("{body}", page["html"])
         )
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -296,10 +296,10 @@ class OnionHandler(http.server.BaseHTTPRequestHandler):
 
     def _not_found(self):
         tpl = _read_template("onion_page.html")
-        body = tpl.format(
-            title="Not Found",
-            nav="",
-            body="<h1>404</h1><p>Page not found.</p>",
+        body = (
+            tpl.replace("{title}", "Not Found")
+            .replace("{nav}", "")
+            .replace("{body}", "<h1>404</h1><p>Page not found.</p>")
         )
         self.send_response(404)
         self.send_header("Content-Type", "text/html; charset=utf-8")
