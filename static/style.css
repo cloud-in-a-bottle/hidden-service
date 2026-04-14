@@ -192,6 +192,17 @@ label {
 .flash-error { background: rgba(229, 49, 112, 0.15); border: 1px solid var(--danger); color: var(--danger); }
 .flash-info { background: rgba(127, 90, 240, 0.15); border: 1px solid var(--accent); color: var(--accent); }
 
+/* Staged keys notice */
+.staged-keys {
+    background: rgba(44, 182, 125, 0.1);
+    border: 1px solid var(--success);
+    border-radius: 6px;
+    padding: 1rem 1.5rem;
+    margin-top: 1.5rem;
+}
+.staged-keys p { margin-bottom: 0.5rem; }
+.staged-keys code { font-family: monospace; color: var(--success); }
+
 /* Onion page styles (served to Tor visitors) */
 .onion-page {
     max-width: 800px;

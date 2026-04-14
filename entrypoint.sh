@@ -30,8 +30,28 @@ if [ ! -f "$STATE_FILE" ]; then
     echo '{"status": "initializing"}' > "$STATE_FILE"
 fi
 
-# Restore existing hidden service keys if available
-if [ -d "$PERSISTENT_HS_DIR" ] && [ -f "$PERSISTENT_HS_DIR/hostname" ]; then
+# Check for staged custom keys (uploaded via Settings but container restarted before apply)
+CUSTOM_KEYS_DIR="$APP_DATA/custom_keys"
+if [ -f "$CUSTOM_KEYS_DIR/hs_ed25519_secret_key" ] && [ -f "$CUSTOM_KEYS_DIR/hs_ed25519_public_key" ]; then
+    echo "[entrypoint] Found staged custom keys, applying..."
+    cp "$CUSTOM_KEYS_DIR/hs_ed25519_secret_key" "$TOR_HS_DIR/"
+    cp "$CUSTOM_KEYS_DIR/hs_ed25519_public_key" "$TOR_HS_DIR/"
+    if [ -f "$CUSTOM_KEYS_DIR/hostname" ]; then
+        cp "$CUSTOM_KEYS_DIR/hostname" "$TOR_HS_DIR/"
+    fi
+    # Persist them
+    mkdir -p "$PERSISTENT_HS_DIR"
+    cp "$CUSTOM_KEYS_DIR/hs_ed25519_secret_key" "$PERSISTENT_HS_DIR/"
+    cp "$CUSTOM_KEYS_DIR/hs_ed25519_public_key" "$PERSISTENT_HS_DIR/"
+    if [ -f "$CUSTOM_KEYS_DIR/hostname" ]; then
+        cp "$CUSTOM_KEYS_DIR/hostname" "$PERSISTENT_HS_DIR/"
+        cp "$CUSTOM_KEYS_DIR/hostname" "$APP_DATA/hostname"
+    fi
+    # Clear staged keys
+    rm -f "$CUSTOM_KEYS_DIR/hs_ed25519_secret_key" "$CUSTOM_KEYS_DIR/hs_ed25519_public_key" "$CUSTOM_KEYS_DIR/hostname"
+    echo "[entrypoint] Custom keys applied and persisted"
+elif [ -d "$PERSISTENT_HS_DIR" ] && [ -f "$PERSISTENT_HS_DIR/hostname" ]; then
+    # Restore existing hidden service keys if available
     echo "[entrypoint] Restoring persisted hidden service keys..."
     cp "$PERSISTENT_HS_DIR/"* "$TOR_HS_DIR/"
     echo "[entrypoint] Restored onion address: $(cat "$PERSISTENT_HS_DIR/hostname")"

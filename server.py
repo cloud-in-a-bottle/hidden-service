@@ -1,12 +1,14 @@
 """
-Tor Hidden Service server with admin CMS and HTTPS onion serving.
+Tor Hidden Service server with admin CMS and custom key support.
 
 Port 8080 (HTTP): Admin panel + health check, behind OpenHost auth.
-Port 3000 (HTTPS): Public-facing onion site serving CMS pages.
+Port 3000 (HTTP): Public-facing onion site serving CMS pages.
 """
 
+import cgi
 import html
 import http.server
+import io
 import json
 import os
 import socketserver
@@ -73,6 +75,8 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/pages/edit/"):
             slug = path[len("/pages/edit/") :]
             self._page_editor_load(slug)
+        elif path == "/settings":
+            self._settings()
         elif path.startswith("/static/"):
             self._serve_static(path[len("/static/") :])
         else:
@@ -81,6 +85,17 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+
+        if path == "/settings/upload-keys":
+            self._upload_keys()
+            return
+        elif path == "/settings/apply-keys":
+            self._apply_keys()
+            return
+        elif path == "/settings/clear-keys":
+            self._clear_keys()
+            return
+
         body = self._read_body()
         params = urllib.parse.parse_qs(body, keep_blank_values=True)
 
@@ -215,6 +230,105 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
     def _page_delete(self, slug: str):
         cms.delete_page(slug)
         self._redirect("/pages")
+
+    def _settings(self, flash: str = ""):
+        onion = cms.get_onion_address() or "Bootstrapping..."
+        staged = cms.get_custom_keys_info()
+
+        tpl = _read_template("admin_settings.html")
+        content = tpl.replace("{onion_address}", html.escape(onion))
+        staged_html = ""
+        if staged:
+            hostname = staged.get("hostname") or "Will be derived from key by Tor"
+            staged_html = (
+                '<div class="staged-keys">'
+                "<p><strong>Custom keys are staged and ready to apply.</strong></p>"
+                f"<p>Expected address: <code>{html.escape(hostname)}</code></p>"
+                '<form method="POST" action="/settings/apply-keys" style="display:inline">'
+                '<button type="submit" class="btn btn-primary" '
+                "onclick=\"return confirm('This will replace your current .onion address. Are you sure?');\">"
+                "Apply Keys &amp; Restart Tor</button></form> "
+                '<form method="POST" action="/settings/clear-keys" style="display:inline">'
+                '<button type="submit" class="btn btn-danger btn-sm">Discard</button></form>'
+                "</div>"
+            )
+        content = content.replace("{staged_keys}", staged_html)
+        self._respond_html(200, _render_admin("Settings", content, flash=flash))
+
+    def _upload_keys(self):
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self._settings(flash=_flash_html("Invalid request.", "error"))
+            return
+
+        # Parse multipart form data
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        environ = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": content_type,
+            "CONTENT_LENGTH": str(length),
+        }
+        fs = cgi.FieldStorage(
+            fp=io.BytesIO(body),
+            environ=environ,
+            keep_blank_values=True,
+        )
+
+        secret_key_data = None
+        public_key_data = None
+        hostname_value = None
+
+        if "secret_key" in fs and fs["secret_key"].file:
+            secret_key_data = fs["secret_key"].file.read()
+        if "public_key" in fs and fs["public_key"].file:
+            public_key_data = fs["public_key"].file.read()
+        if "hostname" in fs:
+            hostname_value = (
+                fs["hostname"].value.strip()
+                if isinstance(fs["hostname"].value, str)
+                else fs["hostname"].value.decode().strip()
+            )
+
+        if not secret_key_data or not public_key_data:
+            self._settings(
+                flash=_flash_html(
+                    "Both secret key and public key files are required.", "error"
+                )
+            )
+            return
+
+        err = cms.stage_custom_keys(
+            secret_key_data, public_key_data, hostname_value or None
+        )
+        if err:
+            self._settings(flash=_flash_html(f"Key validation failed: {err}", "error"))
+            return
+
+        self._settings(
+            flash=_flash_html(
+                "Keys uploaded and staged. Review below and click Apply to activate.",
+                "success",
+            )
+        )
+
+    def _apply_keys(self):
+        err = cms.apply_custom_keys()
+        if err:
+            self._settings(flash=_flash_html(f"Failed to apply keys: {err}", "error"))
+            return
+        # Tor is being killed, which will cause the container to restart.
+        # Show a message before that happens.
+        self._settings(
+            flash=_flash_html(
+                "Keys applied. Tor is restarting — the container will restart momentarily with your new .onion address.",
+                "info",
+            )
+        )
+
+    def _clear_keys(self):
+        cms.clear_custom_keys()
+        self._settings(flash=_flash_html("Staged keys discarded.", "success"))
 
     def _serve_static(self, filename: str):
         filepath = os.path.join(STATIC_DIR, filename)
