@@ -8,7 +8,7 @@ PERSISTENT_HS_DIR="$APP_DATA/hidden_service"
 
 echo "[entrypoint] Setting up Tor hidden service..."
 
-# Create Tor directories
+# Create Tor directories owned by root (we run Tor as root in this container)
 mkdir -p "$TOR_HS_DIR" "$TOR_DATA_DIR"
 
 # Restore persisted hidden service keys if they exist
@@ -19,29 +19,16 @@ fi
 
 # Tor requires strict permissions on hidden service directory
 chmod 700 "$TOR_HS_DIR"
-
-# Try to set ownership to debian-tor (Debian's tor user) or just leave as root
-if id -u debian-tor >/dev/null 2>&1; then
-    chown -R debian-tor:debian-tor "$TOR_HS_DIR" "$TOR_DATA_DIR"
-    TOR_USER="debian-tor"
-else
-    echo "[entrypoint] No tor user found, running Tor as root"
-    TOR_USER=""
-fi
+chown -R root:root "$TOR_HS_DIR" "$TOR_DATA_DIR"
 
 # Start the Python web server in the background
 echo "[entrypoint] Starting web server..."
 python3 /app/server.py &
 SERVER_PID=$!
 
-# Start Tor in the background (as appropriate user)
+# Start Tor as root
 echo "[entrypoint] Starting Tor..."
-if [ -n "$TOR_USER" ]; then
-    tor -f /etc/tor/torrc --RunAsDaemon 0 &
-else
-    # Run as root — need to tell Tor it's okay
-    tor -f /etc/tor/torrc --RunAsDaemon 0 --User root &
-fi
+tor -f /etc/tor/torrc --RunAsDaemon 0 --User root &
 TOR_PID=$!
 
 # Wait for Tor to generate the hostname file
