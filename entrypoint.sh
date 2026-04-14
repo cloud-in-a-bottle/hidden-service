@@ -6,10 +6,29 @@ TOR_HS_DIR="/var/lib/tor/hidden_service"
 TOR_DATA_DIR="/var/lib/tor/data"
 PERSISTENT_HS_DIR="$APP_DATA/hidden_service"
 
+TLS_DIR="/app/tls"
+PERSISTENT_TLS_DIR="$APP_DATA/tls"
+
 echo "[entrypoint] Setting up Tor hidden service..."
 
 # Create Tor directories owned by root (we run Tor as root in this container)
-mkdir -p "$TOR_HS_DIR" "$TOR_DATA_DIR"
+mkdir -p "$TOR_HS_DIR" "$TOR_DATA_DIR" "$TLS_DIR"
+
+# Generate or restore self-signed TLS certificate
+if [ -d "$PERSISTENT_TLS_DIR" ] && [ -f "$PERSISTENT_TLS_DIR/cert.pem" ]; then
+    echo "[entrypoint] Restoring persisted TLS certificate..."
+    cp "$PERSISTENT_TLS_DIR/cert.pem" "$TLS_DIR/"
+    cp "$PERSISTENT_TLS_DIR/key.pem" "$TLS_DIR/"
+else
+    echo "[entrypoint] Generating self-signed TLS certificate..."
+    openssl req -x509 -newkey rsa:2048 -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" \
+        -days 3650 -nodes -subj "/CN=onion-hidden-service"
+    # Persist the cert so it survives restarts
+    mkdir -p "$PERSISTENT_TLS_DIR"
+    cp "$TLS_DIR/cert.pem" "$PERSISTENT_TLS_DIR/"
+    cp "$TLS_DIR/key.pem" "$PERSISTENT_TLS_DIR/"
+    echo "[entrypoint] TLS certificate generated and persisted"
+fi
 
 # Restore persisted hidden service keys if they exist
 if [ -d "$PERSISTENT_HS_DIR" ] && [ -f "$PERSISTENT_HS_DIR/hostname" ]; then

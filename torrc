@@ -5,7 +5,7 @@ SocksPort 0
 
 # Hidden service configuration
 HiddenServiceDir /var/lib/tor/hidden_service
-HiddenServicePort 80 127.0.0.1:3000
+HiddenServicePort 443 127.0.0.1:3000
 
 # Data directory
 DataDirectory /var/lib/tor/data
