@@ -1,0 +1,15 @@
+[app]
+name = "hidden-service"
+version = "0.1.0"
+description = "Tor hidden service hosting a simple web page accessible via .onion"
+
+[runtime.container]
+image = "Dockerfile"
+port = 8080
+
+[resources]
+memory_mb = 512
+cpu_millicores = 500
+
+[data]
+app_data = true

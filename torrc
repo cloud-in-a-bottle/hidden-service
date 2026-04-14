@@ -1,0 +1,14 @@
+## Tor hidden service configuration
+
+# Run Tor as a client + hidden service (no relay)
+SocksPort 0
+
+# Hidden service configuration
+HiddenServiceDir /var/lib/tor/hidden_service
+HiddenServicePort 80 127.0.0.1:3000
+
+# Data directory
+DataDirectory /var/lib/tor/data
+
+# Log to stdout for container logging
+Log notice stdout
