@@ -9,7 +9,6 @@ import html
 import http.server
 import json
 import os
-import shutil
 import socketserver
 import ssl
 import threading
@@ -77,8 +76,6 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/pages/edit/"):
             slug = path[len("/pages/edit/") :]
             self._page_editor_load(slug)
-        elif path == "/settings":
-            self._settings()
         elif path.startswith("/static/"):
             self._serve_static(path[len("/static/") :])
         else:
@@ -98,10 +95,6 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/pages/delete/"):
             slug = path[len("/pages/delete/") :]
             self._page_delete(slug)
-        elif path == "/settings/vanity":
-            self._set_vanity(params)
-        elif path == "/settings/reset-address":
-            self._reset_address()
         else:
             self._not_found()
 
@@ -225,52 +218,6 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
     def _page_delete(self, slug: str):
         cms.delete_page(slug)
         self._redirect("/pages")
-
-    def _settings(self):
-        onion = cms.get_onion_address() or "Not yet generated"
-        prefix = cms.get_vanity_prefix()
-
-        warning = ""
-        if cms.get_onion_address():
-            warning = (
-                '<br><strong style="color: var(--danger);">Warning:</strong> '
-                "Generating a new vanity address will replace your current .onion address permanently."
-            )
-
-        tpl = _read_template("admin_settings.html")
-        content = tpl.format(
-            onion_address=html.escape(onion),
-            current_prefix=html.escape(prefix) if prefix else "<em>none</em>",
-            regenerate_warning=warning,
-        )
-        self._respond_html(200, _render_admin("Settings", content))
-
-    def _set_vanity(self, params: dict):
-        prefix = params.get("prefix", [""])[0].strip().lower()
-        cms.set_vanity_prefix(prefix)
-
-        # Clear existing keys so they'll be regenerated on next restart
-        hs_dir = os.path.join(APP_DATA_DIR, "hidden_service")
-        if os.path.exists(hs_dir):
-            shutil.rmtree(hs_dir)
-        hostname_file = os.path.join(APP_DATA_DIR, "hostname")
-        if os.path.exists(hostname_file):
-            os.remove(hostname_file)
-
-        self._redirect("/settings")
-
-    def _reset_address(self):
-        # Clear vanity prefix
-        cms.set_vanity_prefix("")
-        # Clear existing keys
-        hs_dir = os.path.join(APP_DATA_DIR, "hidden_service")
-        if os.path.exists(hs_dir):
-            shutil.rmtree(hs_dir)
-        hostname_file = os.path.join(APP_DATA_DIR, "hostname")
-        if os.path.exists(hostname_file):
-            os.remove(hostname_file)
-
-        self._redirect("/settings")
 
     def _serve_static(self, filename: str):
         filepath = os.path.join(STATIC_DIR, filename)

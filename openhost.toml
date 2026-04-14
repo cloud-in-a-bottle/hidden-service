@@ -1,7 +1,7 @@
 [app]
 name = "hidden-service"
 version = "0.2.0"
-description = "Tor hidden service with vanity address generation and a simple page editor CMS"
+description = "Tor hidden service with a simple page editor CMS"
 
 [runtime.container]
 image = "Dockerfile"

@@ -3,20 +3,17 @@
 import json
 import os
 import re
-import time
 
 import markdown
 
 APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA", "/data/app_data")
 PAGES_DIR = os.path.join(APP_DATA_DIR, "pages")
-CONFIG_DIR = os.path.join(APP_DATA_DIR, "config")
 STATE_FILE = os.path.join(APP_DATA_DIR, "state.json")
 HOSTNAME_FILE = "/var/lib/tor/hidden_service/hostname"
 
 
 def _ensure_dirs():
     os.makedirs(PAGES_DIR, exist_ok=True)
-    os.makedirs(CONFIG_DIR, exist_ok=True)
 
 
 def _sanitize_slug(slug: str) -> str:
@@ -46,25 +43,6 @@ def get_state() -> dict:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"status": "unknown"}
-
-
-def get_vanity_prefix() -> str:
-    """Get the configured vanity prefix, if any."""
-    config_path = os.path.join(CONFIG_DIR, "vanity_prefix")
-    try:
-        with open(config_path) as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return ""
-
-
-def set_vanity_prefix(prefix: str):
-    """Set the vanity prefix (takes effect on next restart)."""
-    _ensure_dirs()
-    prefix = re.sub(r"[^a-z2-7]", "", prefix.lower())  # base32 chars only
-    config_path = os.path.join(CONFIG_DIR, "vanity_prefix")
-    with open(config_path, "w") as f:
-        f.write(prefix)
 
 
 def list_pages() -> list[dict]:
