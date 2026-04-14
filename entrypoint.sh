@@ -8,13 +8,10 @@ PERSISTENT_HS_DIR="$APP_DATA/hidden_service"
 PAGES_DIR="$APP_DATA/pages"
 STATE_FILE="$APP_DATA/state.json"
 
-TLS_DIR="/app/tls"
-PERSISTENT_TLS_DIR="$APP_DATA/tls"
-
 echo "[entrypoint] Setting up Tor hidden service..."
 
 # Create all directories
-mkdir -p "$TOR_HS_DIR" "$TOR_DATA_DIR" "$TLS_DIR" "$PAGES_DIR"
+mkdir -p "$TOR_HS_DIR" "$TOR_DATA_DIR" "$PAGES_DIR"
 
 # Create default index page if none exists
 if [ ! -f "$PAGES_DIR/index.md" ]; then
@@ -31,21 +28,6 @@ fi
 # Initialize state file if it doesn't exist
 if [ ! -f "$STATE_FILE" ]; then
     echo '{"status": "initializing"}' > "$STATE_FILE"
-fi
-
-# Generate or restore self-signed TLS certificate
-if [ -d "$PERSISTENT_TLS_DIR" ] && [ -f "$PERSISTENT_TLS_DIR/cert.pem" ]; then
-    echo "[entrypoint] Restoring persisted TLS certificate..."
-    cp "$PERSISTENT_TLS_DIR/cert.pem" "$TLS_DIR/"
-    cp "$PERSISTENT_TLS_DIR/key.pem" "$TLS_DIR/"
-else
-    echo "[entrypoint] Generating self-signed TLS certificate..."
-    openssl req -x509 -newkey rsa:2048 -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" \
-        -days 3650 -nodes -subj "/CN=onion-hidden-service" 2>/dev/null
-    mkdir -p "$PERSISTENT_TLS_DIR"
-    cp "$TLS_DIR/cert.pem" "$PERSISTENT_TLS_DIR/"
-    cp "$TLS_DIR/key.pem" "$PERSISTENT_TLS_DIR/"
-    echo "[entrypoint] TLS certificate generated and persisted"
 fi
 
 # Restore existing hidden service keys if available

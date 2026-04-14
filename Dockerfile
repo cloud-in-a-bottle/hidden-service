@@ -6,7 +6,6 @@ RUN apt-get update && \
         tor \
         python3 \
         python3-pip \
-        openssl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

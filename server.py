@@ -10,7 +10,6 @@ import http.server
 import json
 import os
 import socketserver
-import ssl
 import threading
 import urllib.parse
 
@@ -18,8 +17,6 @@ import cms
 
 ONION_PORT = 3000
 ADMIN_PORT = 8080
-TLS_CERT = "/app/tls/cert.pem"
-TLS_KEY = "/app/tls/key.pem"
 TEMPLATES_DIR = "/app/templates"
 STATIC_DIR = "/app/static"
 APP_DATA_DIR = os.environ.get("OPENHOST_APP_DATA", "/data/app_data")
@@ -321,26 +318,6 @@ class OnionHandler(http.server.BaseHTTPRequestHandler):
         print(f"[onion] {args[0]}", flush=True)
 
 
-def run_https_server(handler_class, port, name):
-    """Run an HTTPS server with self-signed cert."""
-    server = socketserver.TCPServer(("0.0.0.0", port), handler_class)
-    server.allow_reuse_address = True
-
-    # Only wrap with TLS if cert exists (might not during early startup)
-    if os.path.exists(TLS_CERT) and os.path.exists(TLS_KEY):
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(certfile=TLS_CERT, keyfile=TLS_KEY)
-        server.socket = ctx.wrap_socket(server.socket, server_side=True)
-        print(f"[{name}] Listening on port {port} (HTTPS)", flush=True)
-    else:
-        print(
-            f"[{name}] WARNING: TLS cert not found, listening on port {port} (HTTP)",
-            flush=True,
-        )
-
-    server.serve_forever()
-
-
 def run_http_server(handler_class, port, name):
     """Run a plain HTTP server."""
     server = socketserver.TCPServer(("0.0.0.0", port), handler_class)
@@ -350,9 +327,9 @@ def run_http_server(handler_class, port, name):
 
 
 def main():
-    # Start onion service handler with HTTPS (Tor connects to this)
+    # Start onion service handler as plain HTTP (Tor already provides encryption)
     onion_thread = threading.Thread(
-        target=run_https_server, args=(OnionHandler, ONION_PORT, "onion"), daemon=True
+        target=run_http_server, args=(OnionHandler, ONION_PORT, "onion"), daemon=True
     )
     onion_thread.start()
 
