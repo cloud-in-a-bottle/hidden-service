@@ -1,0 +1,48 @@
+<div class="status-bar">
+    <div>
+        <span class="status-label">Current Onion Address</span><br>
+        <span class="onion">{onion_address}</span>
+    </div>
+</div>
+
+{staged_keys}
+
+<div style="margin-top: 2rem;">
+    <h2 style="margin-bottom: 1rem;">Import Custom Keys</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+        Upload your own Tor v3 Ed25519 hidden service keys to use a vanity .onion address.
+        Generate keys with a tool like <a href="https://github.com/cathugger/mkp224o" target="_blank">mkp224o</a>.
+    </p>
+
+    <form method="POST" action="/settings/upload-keys" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="secret_key">Secret Key (hs_ed25519_secret_key) — 96 bytes</label>
+            <input type="file" name="secret_key" id="secret_key" required
+                   style="background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 0.5rem; width: 100%;">
+        </div>
+
+        <div class="form-group">
+            <label for="public_key">Public Key (hs_ed25519_public_key) — 64 bytes</label>
+            <input type="file" name="public_key" id="public_key" required
+                   style="background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 0.5rem; width: 100%;">
+        </div>
+
+        <div class="form-group">
+            <label for="hostname">Expected Hostname (optional — for verification display only)</label>
+            <input type="text" name="hostname" id="hostname" placeholder="e.g. myvanityaddr...onion">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Upload Keys</button>
+    </form>
+</div>
+
+<div style="margin-top: 3rem; padding: 1.5rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px;">
+    <h3 style="margin-bottom: 0.75rem; color: var(--text-secondary);">How to generate vanity keys</h3>
+    <ol style="color: var(--text-secondary); font-size: 0.9rem; padding-left: 1.5rem;">
+        <li style="margin-bottom: 0.5rem;">Install <a href="https://github.com/cathugger/mkp224o">mkp224o</a> on a machine with good CPU</li>
+        <li style="margin-bottom: 0.5rem;">Run: <code style="background: var(--bg-primary); padding: 0.15rem 0.4rem; border-radius: 3px;">mkp224o -n 1 -d output_dir yourprefix</code></li>
+        <li style="margin-bottom: 0.5rem;">This will create a directory named with the .onion address containing three files</li>
+        <li style="margin-bottom: 0.5rem;">Upload <code style="background: var(--bg-primary); padding: 0.15rem 0.4rem; border-radius: 3px;">hs_ed25519_secret_key</code> and <code style="background: var(--bg-primary); padding: 0.15rem 0.4rem; border-radius: 3px;">hs_ed25519_public_key</code> above</li>
+        <li>Longer prefixes take exponentially longer (~32x per character). 1-4 chars: seconds to minutes. 5+ chars: hours to days.</li>
+    </ol>
+</div>

@@ -6,6 +6,7 @@ RUN apt-get update && \
         tor \
         python3 \
         python3-pip \
+        procps \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
